@@ -17,7 +17,7 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <ctype.h>
-
+#include <locale.h>
 #include <process.h>
 #include <io.h>
 #include <sys/utime.h>
@@ -48,8 +48,8 @@ typedef struct
         int Low;
     } FileIndex;
     int NumLinks;
-    unsigned long long FileSize;
-    char *FileName;
+    ULONGLONG FileSize;
+    WCHAR *FileName;
     int Larger;  // Child index for larger child
     int Smaller; // Child index for smaller child
 } FileData_t;
@@ -74,7 +74,7 @@ struct
 
 // Parameters for what to do
 FILE *BatchFile = NULL; // Output a batch file
-char *BatchFileName = NULL;
+WCHAR *BatchFileName = NULL;
 
 int PrintFileSigs;   // Print signatures of files
 int PrintDuplicates; // Print duplicates
@@ -90,14 +90,14 @@ int SkipZeroLength = 1;           // Ignore zero length files.
 int ProgressIndicatorVisible = 0; // Weither a progress indicator needs to be overwritten.
 int FollowReparse = 0;            // Wether to follow reparse points (like unix softlinks for NTFS)
 
-int MyGlob(const char *Pattern, int FollowReparse, void (*FileFuncParm)(const char *FileName));
+int MyGlob(const WCHAR *Pattern, int FollowReparse, void (*FileFuncParm)(const WCHAR *FileName));
 
 //--------------------------------------------------------------------------
 // Calculate some 64-bit file signature.  CRC and a checksum
 //--------------------------------------------------------------------------
-static void CalcCrc(Checksum_t *Check, char *Data, unsigned long long NumBytes)
+static void CalcCrc(Checksum_t *Check, char *Data, ULONGLONG NumBytes)
 {
-    unsigned long long a;
+    ULONGLONG a;
     unsigned Reg, Sum;
     Reg = Check->Crc;
     Sum = Check->Sum;
@@ -127,19 +127,19 @@ void ClearProgressInd(void)
 //--------------------------------------------------------------------------
 // Escape names for batch files: % turns into %%
 //--------------------------------------------------------------------------
-char *EscapeBatchName(char *Name)
+WCHAR *EscapeBatchName(WCHAR *Name)
 {
-    static char EscName[_MAX_PATH * 2];
+    static WCHAR EscName[_MAX_PATH * 2];
     int a, b;
     b = 0;
     for (a = 0;;)
     {
-        EscName[b++] = Name[a];
-        if (Name[a] == '\0')
+        EscName[++b] = Name[a];
+        if (Name[a] == L'\0')
             break;
-        if (Name[a] == '%')
-            EscName[b++] = '%'; // Escape '%' with '%%' for batch files.
-        a++;
+        if (Name[a] == L'%')
+            EscName[++b] = L'%'; // Escape '%' with '%%' for batch files.
+        ++a;
     }
     return EscName;
 }
@@ -176,12 +176,12 @@ static int EliminateDuplicate(FileData_t ThisFile, FileData_t DupeOf)
         return 0;
     }
 
-    fopen_s(&File1, ThisFile.FileName, "rb");
+    _wfopen_s(&File1, ThisFile.FileName, L"rb");
     if (File1 == NULL)
     {
         return 0;
     }
-    fopen_s(&File2, DupeOf.FileName, "rb");
+    _wfopen_s(&File2, DupeOf.FileName, L"rb");
     if (File2 == NULL)
     {
         fclose(File1);
@@ -199,13 +199,13 @@ static int EliminateDuplicate(FileData_t ThisFile, FileData_t DupeOf)
         if (fread(Buf1, 1, BytesToRead, File1) != BytesToRead)
         {
             ClearProgressInd();
-            fprintf(stderr, "Error doing full file read on '%s'\n", ThisFile.FileName);
+            fprintf(stderr, "Error doing full file read on '%ls'\n", ThisFile.FileName);
         }
 
         if (fread(Buf2, 1, BytesToRead, File2) != BytesToRead)
         {
             ClearProgressInd();
-            fprintf(stderr, "Error doing full file read on '%s'\n", DupeOf.FileName);
+            fprintf(stderr, "Error doing full file read on '%ls'\n", DupeOf.FileName);
         }
 
         BytesLeft -= BytesToRead;
@@ -235,8 +235,8 @@ dont_read:
         if (!HardlinkSearchMode)
         {
             ClearProgressInd();
-            printf("Duplicate: '%s'\n", DupeOf.FileName);
-            printf("With:      '%s'\n", ThisFile.FileName);
+            printf("Duplicate: '%ls'\n", DupeOf.FileName);
+            printf("With:      '%ls'\n", ThisFile.FileName);
             if (Hardlinked)
             {
                 // If the files happen to be hardlinked, show that.
@@ -245,10 +245,10 @@ dont_read:
         }
     }
 
-    if (_stat64(ThisFile.FileName, &FileStat) != 0)
+    if (_wstat64(ThisFile.FileName, &FileStat) != 0)
     {
         // oops!
-        fprintf(stderr, "stat failed on '%s'\n", ThisFile.FileName);
+        fprintf(stderr, "stat failed on '%ls'\n", ThisFile.FileName);
         exit(EXIT_FAILURE);
     }
     IsReadonly = (FileStat.st_mode & S_IWUSR) ? 0 : 1;
@@ -259,36 +259,35 @@ dont_read:
         if (!DoReadonly)
         {
             ClearProgressInd();
-            printf("Skipping duplicate readonly file '%s'\n",
-                   ThisFile.FileName);
+            printf("Skipping duplicate readonly file '%ls'\n", ThisFile.FileName);
             return 1;
         }
         if (MakeHardLinks || DelDuplicates)
         {
             // Make file read/write so we can delete it.
             // We sort of assume we own the file.  Otherwise, not much we can do.
-            _chmod(ThisFile.FileName, FileStat.st_mode | S_IWUSR);
+            _wchmod(ThisFile.FileName, FileStat.st_mode | S_IWUSR);
         }
     }
 
     if (BatchFile)
     {
         // put command in batch file
-        fprintf(BatchFile, "del %s \"%s\"\n", IsReadonly ? "/F" : "",
+        fprintf(BatchFile, "del %s \"%ls\"\n", IsReadonly ? "/F" : "",
                 EscapeBatchName(ThisFile.FileName));
         if (!DelDuplicates)
         {
-            fprintf(BatchFile, "fsutil hardlink create \"%s\" \"%s\"\n",
+            fprintf(BatchFile, "fsutil hardlink create \"%ls\" \"%ls\"\n",
                     ThisFile.FileName, DupeOf.FileName);
             if (IsReadonly)
             {
                 // If original was readonly, restore that attribute
-                fprintf(BatchFile, "attrib +r \"%s\"\n", ThisFile.FileName);
+                fprintf(BatchFile, "attrib +r \"%ls\"\n", ThisFile.FileName);
             }
         }
         else
         {
-            fprintf(BatchFile, "rem duplicate of \"%s\"\n", DupeOf.FileName);
+            fprintf(BatchFile, "rem duplicate of \"%ls\"\n", DupeOf.FileName);
         }
     }
     else if (MakeHardLinks || DelDuplicates)
@@ -296,33 +295,33 @@ dont_read:
         if (MakeHardLinks && Hardlinked)
             return 0; // Nothign to do.
 
-        if (_unlink(ThisFile.FileName))
+        if (_wunlink(ThisFile.FileName))
         {
             ClearProgressInd();
-            fprintf(stderr, "Delete of '%s' failed\n", DupeOf.FileName);
+            fprintf(stderr, "Delete of '%ls' failed\n", DupeOf.FileName);
             exit(EXIT_FAILURE);
         }
         if (MakeHardLinks)
         {
-            if (CreateHardLink(ThisFile.FileName, DupeOf.FileName, NULL) == 0)
+            if (CreateHardLinkW(ThisFile.FileName, DupeOf.FileName, NULL) == 0)
             {
                 // Uh-oh.  Better stop before we mess up more stuff!
                 ClearProgressInd();
-                fprintf(stderr, "Create hard link from '%s' to '%s' failed\n",
+                fprintf(stderr, "Create hard link from '%ls' to '%ls' failed\n",
                         DupeOf.FileName, ThisFile.FileName);
                 exit(EXIT_FAILURE);
             }
 
             {
                 // set Unix access rights and time to new file
-                struct utimbuf mtime;
-                _chmod(ThisFile.FileName, FileStat.st_mode);
+                struct __utimbuf64 mtime;
+                _wchmod(ThisFile.FileName, FileStat.st_mode);
 
                 // Set mod time to original file's
                 mtime.actime = FileStat.st_mtime;
                 mtime.modtime = FileStat.st_mtime;
 
-                utime(ThisFile.FileName, &mtime);
+                _wutime64(ThisFile.FileName, &mtime);
             }
             ClearProgressInd();
             printf("    Created hardlink\n");
@@ -443,7 +442,7 @@ static void WalkTree(int index, int LinksFirst, int GroupLen)
     t = LinksFirst >= 0 ? LinksFirst : index;
     for (a = 0; a <= GroupLen; a++)
     {
-        printf("  \"%s\"\n", FileData[t].FileName);
+        printf("  \"%ls\"\n", FileData[t].FileName);
         t = FileData[t].Larger;
     }
 
@@ -459,9 +458,9 @@ not_end:
 //--------------------------------------------------------------------------
 // Do selected operations to one file at a time.
 //--------------------------------------------------------------------------
-static void ProcessFile(const char *FileName)
+static void ProcessFile(const WCHAR *FileName)
 {
-    unsigned long long FileSize;
+    ULONGLONG FileSize;
     Checksum_t CheckSum;
     struct _stat64 FileStat;
 
@@ -471,21 +470,20 @@ static void ProcessFile(const char *FileName)
     {
         static int LastPrint, Now;
         Now = GetTickCount();
-        if ((unsigned)(Now - LastPrint) > 200)
+        if ((unsigned)(Now - LastPrint) > 500)
         {
             if (ShowProgress)
             {
-                char ShowName[55];
-                unsigned long long l = strlen(FileName);
-                memset(ShowName, ' ', sizeof(ShowName));
-                ShowName[54] = 0;
-                if (l > 50)
-                    l = 51;
-                memcpy(ShowName, FileName, l);
-                if (l >= 51)
-                    memcpy(ShowName + 50, "...", 4);
+                WCHAR ShowName[105];
+                ULONGLONG l = wcslen(FileName);
+                memset(ShowName, L'\0', sizeof(ShowName));
+                if (l > 100)
+                    l = 101;
+                memcpy(ShowName, FileName, l * sizeof(WCHAR));
+                if (l >= 101)
+                    memcpy(ShowName + 100, L"...", 4 * sizeof(WCHAR));
 
-                printf("Scanned %4d files: %s\r", FilesMatched, ShowName);
+                printf("Scanned %4d files: %ls\n", FilesMatched, ShowName);
                 LastPrint = Now;
                 ProgressIndicatorVisible = 1;
             }
@@ -495,10 +493,10 @@ static void ProcessFile(const char *FileName)
 
     FilesMatched += 1;
 
-    if (BatchFileName && strcmp(FileName, BatchFileName) == 0)
+    if (BatchFileName && wcscmp(FileName, BatchFileName) == 0)
         return;
 
-    if (_stat64(FileName, &FileStat) != 0)
+    if (_wstat64(FileName, &FileStat) != 0)
     {
         // oops!
         goto cant_read_file;
@@ -521,13 +519,13 @@ static void ProcessFile(const char *FileName)
     {
         HANDLE FileHandle;
         BY_HANDLE_FILE_INFORMATION FileInfo;
-        FileHandle = CreateFile(FileName,
-                                GENERIC_READ,          // dwDesiredAccess
-                                FILE_SHARE_READ,       // dwShareMode
-                                NULL,                  // Security attirbutes
-                                OPEN_EXISTING,         // dwCreationDisposition
-                                FILE_ATTRIBUTE_NORMAL, // dwFlagsAndAttributes.  Ignored for opening existing files
-                                NULL);                 // hTemplateFile.  Ignored for existing.
+        FileHandle = CreateFileW(FileName,
+                                 GENERIC_READ,          // dwDesiredAccess
+                                 FILE_SHARE_READ,       // dwShareMode
+                                 NULL,                  // Security attirbutes
+                                 OPEN_EXISTING,         // dwCreationDisposition
+                                 FILE_ATTRIBUTE_NORMAL, // dwFlagsAndAttributes.  Ignored for opening existing files
+                                 NULL);                 // hTemplateFile.  Ignored for existing.
         if (FileHandle == (void *)-1)
         {
         cant_read_file:
@@ -535,7 +533,7 @@ static void ProcessFile(const char *FileName)
             if (!HideCantReadMessage)
             {
                 ClearProgressInd();
-                fprintf(stderr, "Could not read '%s'\n", FileName);
+                fprintf(stderr, "Could not read '%ls'\n", FileName);
             }
             return;
         }
@@ -547,7 +545,7 @@ static void ProcessFile(const char *FileName)
         if (Verbose)
         {
             ClearProgressInd();
-            printf("Hardlinked (%d links) node=%08x %08x: %s\n", FileInfo.nNumberOfLinks,
+            printf("Hardlinked (%ld links) node=%08lx %08lx: %ls\n", FileInfo.nNumberOfLinks,
                    FileInfo.nFileIndexHigh, FileInfo.nFileIndexLow, FileName);
         }
 
@@ -577,17 +575,17 @@ static void ProcessFile(const char *FileName)
     {
         FILE *infile;
         unsigned char FileBuffer[BYTES_DO_CHECKSUM_OF];
-        unsigned long long BytesRead, BytesToRead;
+        ULONGLONG BytesRead, BytesToRead;
         memset(&CheckSum, 0, sizeof(CheckSum));
 
-        fopen_s(&infile, FileName, "rb");
+        _wfopen_s(&infile, FileName, L"rb");
 
         if (infile == NULL)
         {
             if (!HideCantReadMessage)
             {
                 ClearProgressInd();
-                fprintf(stderr, "can't open '%s'\n", FileName);
+                fprintf(stderr, "can't open '%ls'\n", FileName);
             }
             return;
         }
@@ -601,7 +599,7 @@ static void ProcessFile(const char *FileName)
             if (!HideCantReadMessage)
             {
                 ClearProgressInd();
-                fprintf(stderr, "file read problem on '%s'\n", FileName);
+                fprintf(stderr, "file read problem on '%ls'\n", FileName);
             }
             return;
         }
@@ -613,14 +611,14 @@ static void ProcessFile(const char *FileName)
         if (PrintFileSigs)
         {
             ClearProgressInd();
-            printf("%08x%08x %10lld %s\n", CheckSum.Crc, CheckSum.Sum, FileSize, FileName);
+            printf("%08x%08x %10lld %ls\n", CheckSum.Crc, CheckSum.Sum, FileSize, FileName);
         }
 
         ThisFile.Checksum = CheckSum;
         ThisFile.FileSize = FileSize;
     }
 
-    ThisFile.FileName = _strdup(FileName); // allocate the string last, so
+    ThisFile.FileName = _wcsdup(FileName); // allocate the string last, so
                                            // we don't waste memory on errors.
     CheckDuplicate(ThisFile);
 }
@@ -666,82 +664,93 @@ static void Usage(void)
 //--------------------------------------------------------------------------
 int main(int argc, char **argv)
 {
+    setlocale(LC_ALL, "");
     int argn;
-    char *arg;
-    char DefaultDrive;
-    char DriveUsed = '\0';
+    WCHAR *arg;
+    WCHAR DefaultDrive;
+    WCHAR DriveUsed = L'\0';
 
     PrintDuplicates = 1;
     PrintFileSigs = 0;
     HardlinkSearchMode = 0;
     Verbose = 0;
 
+    WCHAR **wargv;
+    wargv = (WCHAR **)calloc(argc, sizeof(WCHAR *));
+#pragma loop(hint_parallel(0))
+    for (argn = 0; argn < argc; argn++)
+    {
+        char *targ = argv[argn];
+        int warglen = MultiByteToWideChar(CP_ACP, 0, targ, strlen(targ) + 1, NULL, 0);
+        wargv[argn] = (WCHAR *)calloc(warglen, sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, targ, strlen(targ) + 1, wargv[argn], warglen);
+    }
+
     for (argn = 1; argn < argc; argn++)
     {
-        arg = argv[argn];
-        if (arg[0] != '-')
+        arg = wargv[argn];
+        if (arg[0] != L'-')
             break; // Filenames from here on.
 
-        if (!strcmp(arg, "-h"))
+        if (!wcscmp(arg, L"-h"))
         {
             Usage();
-            exit(EXIT_FAILURE);
         }
-        else if (!strcmp(arg, "-bat"))
+        else if (!wcscmp(arg, L"-bat"))
         {
-            BatchFileName = argv[++argn];
+            BatchFileName = wargv[++argn];
         }
-        else if (!strcmp(arg, "-v"))
+        else if (!wcscmp(arg, L"-v"))
         {
             PrintDuplicates = 1;
             PrintFileSigs = 1;
             Verbose = 1;
             HideCantReadMessage = 0;
         }
-        else if (!strcmp(arg, "-sigs"))
+        else if (!wcscmp(arg, L"-sigs"))
         {
             PrintDuplicates = 0;
             PrintFileSigs = 1;
         }
-        else if (!strcmp(arg, "-hardlink"))
+        else if (!wcscmp(arg, L"-hardlink"))
         {
             MakeHardLinks = 1;
         }
-        else if (!strcmp(arg, "-del"))
+        else if (!wcscmp(arg, L"-del"))
         {
             DelDuplicates = 1;
         }
-        else if (!strcmp(arg, "-rdonly"))
+        else if (!wcscmp(arg, L"-rdonly"))
         {
             DoReadonly = 1;
         }
-        else if (!strcmp(arg, "-listlink"))
+        else if (!wcscmp(arg, L"-listlink"))
         {
             HardlinkSearchMode = 1;
         }
-        else if (!strcmp(arg, "-ref"))
+        else if (!wcscmp(arg, L"-ref"))
         {
             break;
         }
-        else if (!strcmp(arg, "-z"))
+        else if (!wcscmp(arg, L"-z"))
         {
             SkipZeroLength = 0;
         }
-        else if (!strcmp(arg, "-u"))
+        else if (!wcscmp(arg, L"-u"))
         {
             HideCantReadMessage = 1;
         }
-        else if (!strcmp(arg, "-p"))
+        else if (!wcscmp(arg, L"-p"))
         {
             ShowProgress = 0;
         }
-        else if (!strcmp(arg, "-j"))
+        else if (!wcscmp(arg, L"-j"))
         {
             FollowReparse = 1;
         }
         else
         {
-            printf("Argument '%s' not understood.  Use -h for help.\n", arg);
+            printf("Argument '%ls' not understood.  Use -h for help.\n", arg);
             exit(-1);
         }
     }
@@ -779,10 +788,10 @@ int main(int argc, char **argv)
 
     if (BatchFileName)
     {
-        fopen_s(&BatchFile, BatchFileName, "w");
+        _wfopen_s(&BatchFile, BatchFileName, L"w");
         if (BatchFile == NULL)
         {
-            printf("Unable to open task batch file '%s'\n", BatchFileName);
+            printf("Unable to open task batch file '%ls'\n", BatchFileName);
         }
         fprintf(BatchFile, "@echo off\n");
         fprintf(BatchFile, "REM Batch file for replacing duplicates with hard links\n");
@@ -792,18 +801,18 @@ int main(int argc, char **argv)
     memset(&DupeStats, 0, sizeof(DupeStats));
 
     {
-        char CurrentDir[_MAX_PATH];
-        _getcwd(CurrentDir, sizeof(CurrentDir));
-        DefaultDrive = tolower(CurrentDir[0]);
+        WCHAR CurrentDir[_MAX_PATH];
+        _wgetcwd(CurrentDir, sizeof(CurrentDir));
+        DefaultDrive = towlower(*CurrentDir);
     }
 
     for (; argn < argc; argn++)
     {
         int a;
-        char Drive;
+        WCHAR Drive;
         FilesMatched = 0;
 
-        if (!strcmp(argv[argn], "-ref"))
+        if (!wcscmp(wargv[argn], L"-ref"))
         {
             ReferenceFiles = 1;
             argn += 1;
@@ -817,15 +826,15 @@ int main(int argc, char **argv)
 
         for (a = 0;; a++)
         {
-            if (argv[argn][a] == '\0')
+            if (wargv[argn][a] == L'\0')
                 break;
-            if (argv[argn][a] == '/')
-                argv[argn][a] = '\\';
+            if (wargv[argn][a] == L'/')
+                wargv[argn][a] = L'\\';
         }
 
-        if (argv[argn][1] == ':')
+        if (wargv[argn][1] == L':')
         {
-            Drive = tolower(argv[argn][0]);
+            Drive = towlower(wargv[argn][0]);
         }
         else
         {
@@ -844,11 +853,11 @@ int main(int argc, char **argv)
 
         // Use my globbing module to do fancier wildcard expansion with recursive
         // subdirectories under Windows.
-        MyGlob(argv[argn], FollowReparse, ProcessFile);
+        MyGlob(wargv[argn], FollowReparse, ProcessFile);
 
         if (!FilesMatched)
         {
-            fprintf(stderr, "Error: No files matched '%s'\n", argv[argn]);
+            fprintf(stderr, "Error: No files matched '%ls'\n", wargv[argn]);
         }
     }
 

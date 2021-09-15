@@ -26,8 +26,8 @@
 
 typedef struct
 {
-    char *Name;
-    int attrib;
+    WCHAR *Name;
+    unsigned int attrib;
 } FileEntry;
 
 #ifdef DEBUGGING
@@ -43,27 +43,27 @@ void ShowName(const char *FileName)
 //--------------------------------------------------------------------------------
 // Simple path splicing (assumes no '\' in either part)
 //--------------------------------------------------------------------------------
-static int CatPath(char *dest, const char *p1, const char *p2)
+static int CatPath(WCHAR *dest, const WCHAR *p1, const WCHAR *p2)
 {
     size_t l;
-    l = strlen(p1);
+    l = wcslen(p1);
     if (!l)
     {
-        strcpy(dest, p2);
+        wcscpy(dest, p2);
     }
     else
     {
-        if (l + strlen(p2) > _MAX_PATH - 2)
+        if (l + wcslen(p2) > _MAX_PATH - 2)
         {
             //fprintf(stderr,"\n\n\nPath too long:    \n    %s + %s\n",p1,p2);
             return 0;
         }
-        memcpy(dest, p1, l + 1);
-        if (dest[l - 1] != '\\' && dest[l - 1] != ':')
+        memcpy(dest, p1, (l + 1) * sizeof(WCHAR));
+        if (dest[l - 1] != L'\\' && dest[l - 1] != L':')
         {
-            dest[l++] = '\\';
+            dest[l++] = L'\\';
         }
-        strcpy(dest + l, p2);
+        wcscpy(dest + l, p2);
     }
     return 1;
 }
@@ -73,25 +73,25 @@ static int CatPath(char *dest, const char *p1, const char *p2)
 //--------------------------------------------------------------------------------
 int CompareFunc(const void *f1, const void *f2)
 {
-    return strcmp(((FileEntry *)f1)->Name, ((FileEntry *)f2)->Name);
+    return wcscmp(((FileEntry *)f1)->Name, ((FileEntry *)f2)->Name);
 }
 
 //--------------------------------------------------------------------------------
 // Check if directory is a reparse point
 //--------------------------------------------------------------------------------
-int IsReparsePoint(char *DirName)
+int IsReparsePoint(WCHAR *DirName)
 {
     HANDLE FileHandle;
     BY_HANDLE_FILE_INFORMATION FileInfo;
 
-    FileHandle = CreateFile(DirName,
-                            0,                                // dwDesiredAccess
-                            FILE_SHARE_READ,                  // dwShareMode
-                            NULL,                             // Security attirbutes
-                            OPEN_EXISTING,                    // dwCreationDisposition
-                            FILE_FLAG_BACKUP_SEMANTICS |      // dwFlagsAndAttributes.  Need this to do dirs.
-                                FILE_FLAG_OPEN_REPARSE_POINT, // Need this flag to open the reparse point instead of following it.
-                            NULL);                            // hTemplateFile.  Ignored for existing.
+    FileHandle = CreateFileW(DirName,
+                             0,                                // dwDesiredAccess
+                             FILE_SHARE_READ,                  // dwShareMode
+                             NULL,                             // Security attirbutes
+                             OPEN_EXISTING,                    // dwCreationDisposition
+                             FILE_FLAG_BACKUP_SEMANTICS |      // dwFlagsAndAttributes.  Need this to do dirs.
+                                 FILE_FLAG_OPEN_REPARSE_POINT, // Need this flag to open the reparse point instead of following it.
+                             NULL);                            // hTemplateFile.  Ignored for existing.
     if (FileHandle == (void *)-1)
     {
         return FALSE;
@@ -117,11 +117,11 @@ int IsReparsePoint(char *DirName)
 //--------------------------------------------------------------------------------
 // Decide how a particular pattern should be handled, and call function for each.
 //--------------------------------------------------------------------------------
-static void Recurse(const char *Pattern, int FollowReparse, void (*FileFuncParm)(const char *FileName))
+static void Recurse(const WCHAR *Pattern, int FollowReparse, void (*FileFuncParm)(const WCHAR *FileName))
 {
-    char BasePattern[_MAX_PATH];
-    char MatchPattern[_MAX_PATH];
-    char PatCopy[_MAX_PATH * 2];
+    WCHAR BasePattern[_MAX_PATH];
+    WCHAR MatchPattern[_MAX_PATH];
+    WCHAR PatCopy[_MAX_PATH * 2];
 
     int a;
     int MatchDirs;
@@ -129,7 +129,7 @@ static void Recurse(const char *Pattern, int FollowReparse, void (*FileFuncParm)
     int SawPat;
     int StarStarAt;
 
-    strcpy(PatCopy, Pattern);
+    wcscpy(PatCopy, Pattern);
 
 #ifdef DEBUGGING
     printf("\nCalled with '%s'\n", Pattern);
@@ -146,39 +146,39 @@ DoExtraLevel:
     // Split the path into base path and pattern to match against using findfirst.
     for (a = 0;; a++)
     {
-        if (PatCopy[a] == '*' || PatCopy[a] == '?')
+        if (PatCopy[a] == L'*' || PatCopy[a] == L'?')
         {
             SawPat = TRUE;
         }
 
-        if (PatCopy[a] == '*' && PatCopy[a + 1] == '*')
+        if (PatCopy[a] == L'*' && PatCopy[a + 1] == L'*')
         {
-            if (a == 0 || PatCopy[a - 1] == '\\' || PatCopy[a - 1] == ':')
+            if (a == 0 || PatCopy[a - 1] == L'\\' || PatCopy[a - 1] == L':')
             {
-                if (PatCopy[a + 2] == '\\' || PatCopy[a + 2] == '\0')
+                if (PatCopy[a + 2] == L'\\' || PatCopy[a + 2] == L'\0')
                 {
                     // x\**\y  ---> x\y  x\*\**\y
                     StarStarAt = a;
-                    if (PatCopy[a + 2])
+                    if (PatCopy[a + 2] != L'\0')
                     {
-                        memcpy(PatCopy + a, PatCopy + a + 3, strlen(PatCopy) - a - 1);
+                        memcpy(PatCopy + a, PatCopy + a + 3, (wcslen(PatCopy) - a - 1) * sizeof(WCHAR));
                     }
                     else
                     {
-                        PatCopy[a + 1] = '\0';
+                        PatCopy[a + 1] = L'\0';
                     }
                 }
             }
         }
 
-        if (PatCopy[a] == '\\' || (PatCopy[a] == ':' && PatCopy[a + 1] != '\\'))
+        if (PatCopy[a] == L'\\' || (PatCopy[a] == L':' && PatCopy[a + 1] != L'\\'))
         {
             PatternEnd = a;
             if (SawPat)
                 break; // Findfirst can only match one level of wildcard at a time.
             BaseEnd = a + 1;
         }
-        if (PatCopy[a] == '\0')
+        if (PatCopy[a] == L'\0')
         {
             PatternEnd = a;
             MatchDirs = FALSE;
@@ -186,10 +186,10 @@ DoExtraLevel:
         }
     }
 
-    strncpy(BasePattern, PatCopy, BaseEnd);
+    wcsncpy(BasePattern, PatCopy, BaseEnd);
     BasePattern[BaseEnd] = 0;
 
-    strncpy(MatchPattern, PatCopy, PatternEnd);
+    wcsncpy(MatchPattern, PatCopy, PatternEnd);
     MatchPattern[PatternEnd] = 0;
 
 #ifdef DEBUGGING
@@ -201,10 +201,10 @@ DoExtraLevel:
         int NumAllocated = 0;
         int NumHave = 0;
 
-        struct _finddatai64_t finddata;
+        struct _wfinddatai64_t finddata;
         long long find_handle;
 
-        find_handle = _findfirst64(MatchPattern, &finddata);
+        find_handle = _wfindfirst64(MatchPattern, &finddata);
 
         for (;;)
         {
@@ -212,9 +212,9 @@ DoExtraLevel:
                 break;
 
             // Eliminate the obvious patterns.
-            if (!memcmp(finddata.name, ".", 2))
+            if (!memcmp(finddata.name, L".", 2 * sizeof(WCHAR)))
                 goto next_file;
-            if (!memcmp(finddata.name, "..", 3))
+            if (!memcmp(finddata.name, L"..", 3 * sizeof(WCHAR)))
                 goto next_file;
 
             if (finddata.attrib & _A_SUBDIR)
@@ -236,20 +236,20 @@ DoExtraLevel:
                 if (FileList == NULL)
                     goto nomem;
             }
-            a = strlen(finddata.name);
-            FileList[NumHave].Name = malloc(a + 1);
+            a = wcslen(finddata.name);
+            FileList[NumHave].Name = malloc((a + 1) * sizeof(WCHAR));
             if (FileList[NumHave].Name == NULL)
             {
             nomem:
                 printf("malloc failure\n");
                 exit(-1);
             }
-            memcpy(FileList[NumHave].Name, finddata.name, a + 1);
+            memcpy(FileList[NumHave].Name, finddata.name, (a + 1) * sizeof(WCHAR));
             FileList[NumHave].attrib = finddata.attrib;
             NumHave++;
 
         next_file:
-            if (_findnext64(find_handle, &finddata) != 0)
+            if (_wfindnext64(find_handle, &finddata) != 0)
                 break;
         }
         _findclose(find_handle);
@@ -260,14 +260,14 @@ DoExtraLevel:
         // Use the list.
         for (a = 0; a < NumHave; a++)
         {
-            char CombinedName[_MAX_PATH * 2];
+            WCHAR CombinedName[_MAX_PATH * 2];
             if (FileList[a].attrib & _A_SUBDIR)
             {
                 if (CatPath(CombinedName, BasePattern, FileList[a].Name))
                 {
                     if (FollowReparse || !IsReparsePoint(CombinedName))
                     {
-                        strcat(CombinedName, PatCopy + PatternEnd);
+                        wcscat(CombinedName, PatCopy + PatternEnd);
                         Recurse(CombinedName, FollowReparse, FileFuncParm);
                     }
                 }
@@ -286,10 +286,10 @@ DoExtraLevel:
 
     if (StarStarAt >= 0)
     {
-        strcpy(MatchPattern, PatCopy + StarStarAt);
+        wcscpy(MatchPattern, PatCopy + StarStarAt);
         PatCopy[StarStarAt] = 0;
-        strcpy(PatCopy + StarStarAt, "*\\**\\");
-        strcat(PatCopy, MatchPattern);
+        wcscpy(PatCopy + StarStarAt, L"*\\**\\");
+        wcscat(PatCopy, MatchPattern);
 
 #ifdef DEBUGGING
         printf("Recurse with '%s'\n", PatCopy);
@@ -304,43 +304,43 @@ DoExtraLevel:
 //--------------------------------------------------------------------------------
 // Do quick precheck - if no wildcards, and it names a directory, do whole dir.
 //--------------------------------------------------------------------------------
-int MyGlob(const char *Pattern, int FollowReparse, void (*FileFuncParm)(const char *FileName))
+int MyGlob(const WCHAR *Pattern, int FollowReparse, void (*FileFuncParm)(const WCHAR *FileName))
 {
     int a;
-    char PathCopy[_MAX_PATH];
+    WCHAR PathCopy[_MAX_PATH];
 
-    strncpy(PathCopy, Pattern, _MAX_PATH - 1);
-    a = strlen(PathCopy);
-    if (a && PathCopy[a - 1] == '\\')
+    wcsncpy(PathCopy, Pattern, _MAX_PATH - 1);
+    a = wcslen(PathCopy);
+    if (a && PathCopy[a - 1] == L'\\')
     { // Endsi with backslash
-        if (!(a == 3 && PathCopy[1] == ':'))
+        if (!(a == 3 && PathCopy[1] == L':'))
         {
             // and its not something like c:\, then delete the trailing backslash
-            PathCopy[a - 1] = '\0';
+            PathCopy[a - 1] = L'\0';
         }
     }
 
     for (a = 0;; a++)
     {
-        if (PathCopy[a] == '*' || PathCopy[a] == '?')
+        if (PathCopy[a] == L'*' || PathCopy[a] == L'?')
             break; // Contains wildcards
-        if (PathCopy[a] == '\0')
+        if (PathCopy[a] == L'\0')
             break;
     }
 
-    if (PathCopy[a] == '\0')
+    if (PathCopy[a] == L'\0')
     {
         // No wildcards were specified.  Do a whole tree, or file.
-        struct stat FileStat;
-        if (stat(PathCopy, &FileStat) != 0)
+        struct _stat64 FileStat;
+        if (_wstat64(PathCopy, &FileStat) != 0)
         {
             // There is no file or directory by that name.
-            return -1;
             printf("Stat failed\n");
+            return -1;
         }
         if (FileStat.st_mode & 040000)
         {
-            if (CatPath(PathCopy, PathCopy, "**"))
+            if (CatPath(PathCopy, PathCopy, L"**"))
             {
                 Recurse(PathCopy, FollowReparse, FileFuncParm);
             }
