@@ -5,15 +5,15 @@
 ### src
 **Modified from [FINDDUPE: Duplicate file detector and eliminator](https://www.sentex.ca/~mwandel/finddupe/index.html)**
 
-Minor modification, just change some methods to adapt it to 64 bit, so it can check files those are larger than 4GB. Also worked on makefile to adapt MSVC142.
+Minor modification, just adapt the code to fit 64 bit systems, so it can check files those are larger than 4GB.  
+Create a solution based on Visual Studio 2022
 ****
-### compile
-Make sure your computer has Visual Studio or Build Tools with C++ workloads installed. Use the "x64 Native Tools Command Prompt for VS ****" on x64 Windows or "x86_x64 Cross Tools Command Prompt for VS ****" on x86 Windows.  
-Change the working directory to where you download the code, then execute "nmake", with "/nologo" arg if you prefer.
 ### useage
 Work on x64 Windows only.  
-Use cmd or powershell  
-
+Need vcredist for x64 2015-2022.  
+Use cmd or powershell.  
+  
+  
 finddupe command line options  
 
 **finddupe [options] [-ref] <filepat> [filepat]...**  
