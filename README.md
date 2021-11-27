@@ -10,7 +10,6 @@ Create a solution based on Visual Studio 2022
 ****
 ### useage
 Work on x64 Windows only.  
-Need vcredist for x64 2015-2022.  
 Use cmd or powershell.  
   
   
