@@ -662,7 +662,7 @@ static void Usage(void)
 //--------------------------------------------------------------------------
 // The main program.
 //--------------------------------------------------------------------------
-int main(int argc, char** argv)
+int wmain(int argc, WCHAR** argv)
 {
 	setlocale(LC_ALL, "");
 	int argn;
@@ -675,20 +675,9 @@ int main(int argc, char** argv)
 	HardlinkSearchMode = 0;
 	Verbose = 0;
 
-	WCHAR** wargv;
-	wargv = (WCHAR**)calloc(argc, sizeof(WCHAR*));
-#pragma loop(hint_parallel(0))
-	for (argn = 0; argn < argc; argn++)
-	{
-		char* targ = argv[argn];
-		int warglen = MultiByteToWideChar(CP_ACP, 0, targ, strlen(targ) + 1, NULL, 0);
-		wargv[argn] = (WCHAR*)calloc(warglen, sizeof(WCHAR));
-		MultiByteToWideChar(CP_ACP, 0, targ, strlen(targ) + 1, wargv[argn], warglen);
-	}
-
 	for (argn = 1; argn < argc; argn++)
 	{
-		arg = wargv[argn];
+		arg = argv[argn];
 		if (arg[0] != L'-')
 			break; // Filenames from here on.
 
@@ -698,7 +687,7 @@ int main(int argc, char** argv)
 		}
 		else if (!wcscmp(arg, L"-bat"))
 		{
-			BatchFileName = wargv[++argn];
+			BatchFileName = argv[++argn];
 		}
 		else if (!wcscmp(arg, L"-v"))
 		{
@@ -812,7 +801,7 @@ int main(int argc, char** argv)
 		WCHAR Drive;
 		FilesMatched = 0;
 
-		if (!wcscmp(wargv[argn], L"-ref"))
+		if (!wcscmp(argv[argn], L"-ref"))
 		{
 			ReferenceFiles = 1;
 			argn += 1;
@@ -826,15 +815,15 @@ int main(int argc, char** argv)
 
 		for (a = 0;; a++)
 		{
-			if (wargv[argn][a] == L'\0')
+			if (argv[argn][a] == L'\0')
 				break;
-			if (wargv[argn][a] == L'/')
-				wargv[argn][a] = L'\\';
+			if (argv[argn][a] == L'/')
+				argv[argn][a] = L'\\';
 		}
 
-		if (wargv[argn][1] == L':')
+		if (argv[argn][1] == L':')
 		{
-			Drive = towlower(wargv[argn][0]);
+			Drive = towlower(argv[argn][0]);
 		}
 		else
 		{
@@ -853,11 +842,11 @@ int main(int argc, char** argv)
 
 		// Use my globbing module to do fancier wildcard expansion with recursive
 		// subdirectories under Windows.
-		MyGlob(wargv[argn], FollowReparse, ProcessFile);
+		MyGlob(argv[argn], FollowReparse, ProcessFile);
 
 		if (!FilesMatched)
 		{
-			fprintf(stderr, "Error: No files matched '%ls'\n", wargv[argn]);
+			fprintf(stderr, "Error: No files matched '%ls'\n", argv[argn]);
 		}
 	}
 
