@@ -5,12 +5,14 @@
 ### src
 **Modified from [FINDDUPE: Duplicate file detector and eliminator](https://www.sentex.ca/~mwandel/finddupe/index.html)**
 
-Minor modification, just adapt the code to fit 64 bit systems, so it can check files those are larger than 4GB.  
-Create a solution based on Visual Studio 2022
+Minor modification, just adapt the code to fit 64 bit unicode systems, so it can check files those are larger than 4GB, and display unicode filenames correctly.  
+  
+Create a solution based on Visual Studio 2022 to use modern build tools.
 ****
 ### useage
 Work on x64 Windows only.  
-Use cmd or powershell.  
+  
+Use your favourite shell.  
   
   
 finddupe command line options  
@@ -31,3 +33,6 @@ finddupe command line options
 `[filepat]`	File pattern matching in finddupe is very powerful. It uses the same code as is used in jhead. For example, to specify c:\** would indicate every file on the entire C drive. Specifying C:\**\foo\*.jpg specifies any file that ends with .jpg that is in a subdirectory called foo anywhere on the hard drive, including such directories as c:\foo, c:\bar\foo, c:\hello\workd\foo and c:\foo\bar\foo.  
   
 For more detailed infomation, check [FINDDUPE: Duplicate file detector and eliminator](https://www.sentex.ca/~mwandel/finddupe/index.html).
+****
+### thanks
+[Chuyu-Team/VC-LTL5](https://github.com/Chuyu-Team/VC-LTL5) This project uses VC-LTL to shrink size of the artifact.  
