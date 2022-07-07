@@ -16,11 +16,10 @@
 #include <ctype.h>
 #include <io.h>
 #include <sys/stat.h>
+#include <stdbool.h>
 #define WIN32_LEAN_AND_MEAN // To keep windows.h bloat down.
+#define _WIN32_WINNT 0x0600
 #include <windows.h>
-
-#define TRUE 1
-#define FALSE 0
 
 //#define DEBUGGING
 
@@ -43,7 +42,7 @@ void ShowName(const char* FileName)
 //--------------------------------------------------------------------------------
 // Simple path splicing (assumes no '\' in either part)
 //--------------------------------------------------------------------------------
-static int CatPath(WCHAR* dest, const WCHAR* p1, const WCHAR* p2)
+static bool CatPath(WCHAR* dest, const WCHAR* p1, const WCHAR* p2)
 {
 	size_t l;
 	l = wcslen(p1);
@@ -56,16 +55,16 @@ static int CatPath(WCHAR* dest, const WCHAR* p1, const WCHAR* p2)
 		if (l + wcslen(p2) > _MAX_PATH - 2)
 		{
 			//fprintf(stderr,"\n\n\nPath too long:    \n    %s + %s\n",p1,p2);
-			return 0;
+			return false;
 		}
 		memcpy(dest, p1, (l + 1) * sizeof(WCHAR));
 		if (dest[l - 1] != L'\\' && dest[l - 1] != L':')
 		{
 			dest[l++] = L'\\';
 		}
-		wcscpy_s(dest + l, _MAX_PATH, p2);
+		wcscpy_s(dest + l, _MAX_PATH - l, p2);
 	}
-	return 1;
+	return true;
 }
 
 //--------------------------------------------------------------------------------
@@ -79,7 +78,7 @@ int CompareFunc(const void* f1, const void* f2)
 //--------------------------------------------------------------------------------
 // Check if directory is a reparse point
 //--------------------------------------------------------------------------------
-int IsReparsePoint(WCHAR* DirName)
+bool IsReparsePoint(WCHAR* DirName)
 {
 	HANDLE FileHandle;
 	BY_HANDLE_FILE_INFORMATION FileInfo;
@@ -94,40 +93,39 @@ int IsReparsePoint(WCHAR* DirName)
 		NULL);                            // hTemplateFile.  Ignored for existing.
 	if (FileHandle == (void*)-1)
 	{
-		return FALSE;
+		return false;
 	}
 
 	if (!GetFileInformationByHandle(FileHandle, &FileInfo))
 	{
-		return FALSE;
+		CloseHandle(FileHandle);
+		return false;
 	}
-
 	// Directory node is in: FileInfo.nFileIndexHigh, FileInfo.nFileIndexLow
 
+	CloseHandle(FileHandle);
 	if (FileInfo.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
 	{
-		return TRUE;
+		return true;
 	}
 	else
 	{
-		return FALSE;
+		return false;
 	}
 }
 
 //--------------------------------------------------------------------------------
 // Decide how a particular pattern should be handled, and call function for each.
 //--------------------------------------------------------------------------------
-static void Recurse(const WCHAR* Pattern, int FollowReparse, void (*FileFuncParm)(const WCHAR* FileName))
+static void Recurse(const WCHAR* Pattern, bool FollowReparse, void (*FileFuncParm)(const WCHAR* FileName))
 {
 	WCHAR BasePattern[_MAX_PATH];
 	WCHAR MatchPattern[_MAX_PATH];
 	WCHAR PatCopy[_MAX_PATH * 2];
 
-	int a;
-	int MatchDirs;
-	int BaseEnd, PatternEnd;
-	int SawPat;
-	int StarStarAt;
+	size_t a;
+	bool MatchDirs, SawPat, HasSSA;
+	size_t BaseEnd, PatternEnd, StarStarAt;
 
 	wcscpy_s(PatCopy, _MAX_PATH * 2, Pattern);
 
@@ -136,19 +134,20 @@ static void Recurse(const WCHAR* Pattern, int FollowReparse, void (*FileFuncParm
 #endif
 
 DoExtraLevel:
-	MatchDirs = TRUE;
+	MatchDirs = true;
 	BaseEnd = 0;
 	PatternEnd = 0;
 
-	SawPat = FALSE;
-	StarStarAt = -1;
+	SawPat = false;
+	HasSSA = false;
+	StarStarAt = 0;
 
 	// Split the path into base path and pattern to match against using findfirst.
 	for (a = 0;; a++)
 	{
 		if (PatCopy[a] == L'*' || PatCopy[a] == L'?')
 		{
-			SawPat = TRUE;
+			SawPat = true;
 		}
 
 		if (PatCopy[a] == L'*' && PatCopy[a + 1] == L'*')
@@ -158,6 +157,7 @@ DoExtraLevel:
 				if (PatCopy[a + 2] == L'\\' || PatCopy[a + 2] == L'\0')
 				{
 					// x\**\y  ---> x\y  x\*\**\y
+					HasSSA = true;
 					StarStarAt = a;
 					if (PatCopy[a + 2] != L'\0')
 					{
@@ -181,7 +181,7 @@ DoExtraLevel:
 		if (PatCopy[a] == L'\0')
 		{
 			PatternEnd = a;
-			MatchDirs = FALSE;
+			MatchDirs = false;
 			break;
 		}
 	}
@@ -198,8 +198,7 @@ DoExtraLevel:
 
 	{
 		FileEntry* FileList = NULL;
-		int NumAllocated = 0;
-		int NumHave = 0;
+		size_t NumAllocated = 0, NumHave = 0;
 
 		struct _wfinddatai64_t finddata;
 		long long find_handle;
@@ -232,7 +231,8 @@ DoExtraLevel:
 			if (NumAllocated <= NumHave)
 			{
 				NumAllocated = NumAllocated + 10 + NumAllocated / 2;
-				FileList = realloc(FileList, NumAllocated * sizeof(FileEntry));
+#pragma warning(disable:6308)
+				FileList = (FileEntry*)realloc(FileList, NumAllocated * sizeof(FileEntry));
 				if (FileList == NULL)
 					goto nomem;
 			}
@@ -241,8 +241,8 @@ DoExtraLevel:
 			if (FileList[NumHave].Name == NULL)
 			{
 			nomem:
-				printf("malloc failure\n");
-				exit(-1);
+				fwprintf(stderr, L"Malloc failure.\n");
+				exit(EXIT_FAILURE);
 			}
 			memcpy(FileList[NumHave].Name, finddata.name, (a + 1) * sizeof(WCHAR));
 			FileList[NumHave].attrib = finddata.attrib;
@@ -284,7 +284,7 @@ DoExtraLevel:
 		free(FileList);
 	}
 
-	if (StarStarAt >= 0)
+	if (HasSSA)
 	{
 		wcscpy_s(MatchPattern, _MAX_PATH, PatCopy + StarStarAt);
 		PatCopy[StarStarAt] = 0;
@@ -304,15 +304,15 @@ DoExtraLevel:
 //--------------------------------------------------------------------------------
 // Do quick precheck - if no wildcards, and it names a directory, do whole dir.
 //--------------------------------------------------------------------------------
-int MyGlob(const WCHAR* Pattern, int FollowReparse, void (*FileFuncParm)(const WCHAR* FileName))
+int MyGlob(const WCHAR* Pattern, bool FollowReparse, void (*FileFuncParm)(const WCHAR* FileName))
 {
-	int a;
+	size_t a;
 	WCHAR PathCopy[_MAX_PATH];
 
 	wcsncpy_s(PathCopy, _MAX_PATH, Pattern, _MAX_PATH - 1);
 	a = wcslen(PathCopy);
 	if (a && PathCopy[a - 1] == L'\\')
-	{ // Endsi with backslash
+	{ // Ends with backslash
 		if (!(a == 3 && PathCopy[1] == L':'))
 		{
 			// and its not something like c:\, then delete the trailing backslash
@@ -335,8 +335,8 @@ int MyGlob(const WCHAR* Pattern, int FollowReparse, void (*FileFuncParm)(const W
 		if (_wstat64(PathCopy, &FileStat) != 0)
 		{
 			// There is no file or directory by that name.
-			printf("Stat failed\n");
-			return -1;
+			fwprintf(stderr, L"Stat failed.\n");
+			exit(EXIT_FAILURE);
 		}
 		if (FileStat.st_mode & 040000)
 		{
